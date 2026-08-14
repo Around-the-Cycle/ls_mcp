@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Launcher for MCP hosts. Installs dependencies if they're missing, then execs
+# the server. Without this, a missing node_modules surfaces in the host as an
+# opaque "Connection closed" with the real cause buried in stderr.
+#
+# stdout is the MCP protocol channel, so all diagnostic output goes to stderr.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ ! -d "$root/node_modules/@modelcontextprotocol/sdk" ]; then
+  echo "ls-mcp: dependencies missing, installing..." >&2
+  (cd "$root" && npm install --no-fund --no-audit >&2)
+fi
+
+exec node "$root/index.js" "$@"
