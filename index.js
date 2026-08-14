@@ -10,6 +10,10 @@ import {
   fetchSalesSummary,
   fetchOrders,
   fetchOrder,
+  fetchWorkorders,
+  fetchWorkorder,
+  fetchWorkorderStatuses,
+  fetchWorkorderStatus,
   fetchItems,
   fetchItem,
   fetchCustomers,
@@ -237,6 +241,100 @@ server.registerTool(
       return { content: [{ type: "text", text: `No order found for orderID ${order_id}` }], isError: true };
     }
     return { content: [{ type: "text", text: JSON.stringify(order, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_workorders",
+  {
+    description:
+      "List Lightspeed Retail (R-Series) workorders — service/repair tickets (customer, employee, status, " +
+      "parts, labor) — newest first. NOT the same as list_orders: Order is a vendor purchase order (stock " +
+      "you're buying in), Workorder is a repair/service job (work you're doing for a customer). Includes " +
+      "each workorder's WorkorderLines (labor/tasks) and WorkorderItems (parts used) by default.",
+    inputSchema: {
+      since: z
+        .string()
+        .optional()
+        .describe("ISO 8601 timestamp. Only return workorders at or after this time, e.g. 2024-01-01T00:00:00-05:00"),
+      until: z
+        .string()
+        .optional()
+        .describe("ISO 8601 timestamp. Only return workorders at or before this time."),
+      customer_id: z.union([z.string(), z.number()]).optional().describe("Only return workorders for this customerID."),
+      employee_id: z.union([z.string(), z.number()]).optional().describe("Only return workorders assigned to this employeeID."),
+      workorder_status_id: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Only return workorders with this workorderStatusID. Use list_workorder_statuses to look up IDs/names."),
+      include_lines: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe("Include each workorder's WorkorderLines and WorkorderItems in the result."),
+      limit: limitSchema(50),
+    },
+  },
+  async ({ since, until, customer_id, employee_id, workorder_status_id, include_lines, limit }) => {
+    const { workorders, hasMore, apiCount } = await fetchWorkorders(client, {
+      since,
+      until,
+      customerId: customer_id,
+      employeeId: employee_id,
+      workorderStatusId: workorder_status_id,
+      includeLines: include_lines,
+      limit,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("workorders", workorders, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_workorder",
+  {
+    description: "Fetch a single Lightspeed workorder (repair/service ticket) by its workorderID, including WorkorderLines and WorkorderItems.",
+    inputSchema: {
+      workorder_id: z.union([z.string(), z.number()]).describe("The Lightspeed workorderID to look up."),
+      include_lines: z.boolean().optional().default(true),
+    },
+  },
+  async ({ workorder_id, include_lines }) => {
+    const workorder = await fetchWorkorder(client, workorder_id, { includeLines: include_lines });
+    if (!workorder) {
+      return { content: [{ type: "text", text: `No workorder found for workorderID ${workorder_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(workorder, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_workorder_statuses",
+  {
+    description:
+      "List the workorder status labels configured on this Lightspeed account (e.g. 'In Progress', 'Ready " +
+      "for Pickup'), used to resolve Workorder.workorderStatusID to a human-readable name/color.",
+    inputSchema: { limit: limitSchema(50) },
+  },
+  async ({ limit }) => {
+    const { workorderStatuses, hasMore, apiCount } = await fetchWorkorderStatuses(client, { limit });
+    return {
+      content: [{ type: "text", text: JSON.stringify(paginatedPayload("workorderStatuses", workorderStatuses, hasMore, apiCount), null, 2) }],
+    };
+  }
+);
+
+server.registerTool(
+  "get_workorder_status",
+  {
+    description: "Fetch a single Lightspeed workorder status by its workorderStatusID.",
+    inputSchema: { workorder_status_id: z.union([z.string(), z.number()]).describe("The Lightspeed workorderStatusID to look up.") },
+  },
+  async ({ workorder_status_id }) => {
+    const status = await fetchWorkorderStatus(client, workorder_status_id);
+    if (!status) {
+      return { content: [{ type: "text", text: `No workorder status found for workorderStatusID ${workorder_status_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
   }
 );
 

@@ -63,6 +63,19 @@ Claude Desktop after editing the config.
   usually what you want to see, unlike `completed_only` on `list_sales`.
 - `get_order(order_id, include_lines?)` — a single purchase order by
   `orderID`, including `OrderLines` (items ordered/received).
+- `list_workorders(since?, until?, customer_id?, employee_id?, workorder_status_id?, include_lines?, limit?)`
+  — service/repair tickets, newest first. **Not the same as `list_orders`**:
+  `Order` is a vendor purchase order (stock coming in), `Workorder` is a
+  repair/service job (work done for a customer). Includes each workorder's
+  `WorkorderLines` (labor/tasks) and `WorkorderItems` (parts used) by
+  default.
+- `get_workorder(workorder_id, include_lines?)` — a single workorder by
+  `workorderID`.
+- `list_workorder_statuses(limit?)` — the status labels configured on the
+  account (e.g. "In Progress", "Ready for Pickup"), for resolving
+  `Workorder.workorderStatusID`.
+- `get_workorder_status(workorder_status_id)` — a single status by
+  `workorderStatusID`.
 - `list_items(search?, since?, until?, limit?)` — catalog items, `search`
   matches against `description` (substring).
 - `get_item(item_id)` — a single catalog item by `itemID`.
@@ -94,12 +107,12 @@ Every `list_*` tool's response includes `count` (records returned),
 provides one — note this is *before* client-side filters like
 `completed_only`, so it can be a bit higher than the true filtered total).
 
-Scope: `Sale`, `Order`, `Item`, `Customer`, `Vendor`, `Employee`,
-`Category`, `Manufacturer`, and `Shop` are exposed — not the full Lightspeed
-API surface (no write endpoints, no other resources like
-Register/Inventory/Tax). `LightspeedClient.request()` in `lightspeed.js` is
-generic, so adding another read-only resource follows the same pattern as
-the existing `fetch*` helpers.
+Scope: `Sale`, `Order`, `Workorder`/`WorkorderStatus`, `Item`, `Customer`,
+`Vendor`, `Employee`, `Category`, `Manufacturer`, and `Shop` are exposed —
+not the full Lightspeed API surface (no write endpoints, no other resources
+like Register/Inventory/Tax). `LightspeedClient.request()` in
+`lightspeed.js` is generic, so adding another read-only resource follows
+the same pattern as the existing `fetch*` helpers.
 
 ## Notes
 

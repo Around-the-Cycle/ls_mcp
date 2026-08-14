@@ -355,6 +355,52 @@ export async function fetchOrder(client, orderId, { includeLines = true } = {}) 
   return json?.Order ?? null;
 }
 
+// Service/repair tickets (customer, employee, status, parts, labor) — a
+// completely different resource from Order (vendor purchase orders), despite
+// the similar name. `customerId`/`employeeId`/`workorderStatusId` filter by
+// exact match; resolve status IDs to human-readable names via
+// fetchWorkorderStatuses. Includes both WorkorderLines (labor/tasks) and
+// WorkorderItems (parts used) by default.
+// Returns { workorders, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchWorkorders(
+  client,
+  { since, until, customerId, employeeId, workorderStatusId, limit = 50, includeLines = true, maxPages = 50 } = {}
+) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "-timeStamp",
+    ...(includeLines ? { load_relations: '["WorkorderLines","WorkorderItems"]' } : {}),
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(customerId !== undefined ? { customerID: customerId } : {}),
+    ...(employeeId !== undefined ? { employeeID: employeeId } : {}),
+    ...(workorderStatusId !== undefined ? { workorderStatusID: workorderStatusId } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Workorder", params, { limit, maxPages });
+  return { workorders: results, hasMore, apiCount };
+}
+
+export async function fetchWorkorder(client, workorderId, { includeLines = true } = {}) {
+  const params = includeLines ? { load_relations: '["WorkorderLines","WorkorderItems"]' } : {};
+  const json = await client.request(`Workorder/${workorderId}.json`, params);
+  return json?.Workorder ?? null;
+}
+
+// Reference list of workorder status labels (name/color) — used to resolve
+// Workorder.workorderStatusID to a human-readable status like "In Progress"
+// or "Ready for Pickup". Small, mostly-static list; no search/date filters.
+// Returns { workorderStatuses, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchWorkorderStatuses(client, { limit = 50, maxPages = 50 } = {}) {
+  const params = { limit: Math.min(limit, 100), sort: "workorderStatusID" };
+  const { results, hasMore, apiCount } = await paginate(client, "WorkorderStatus", params, { limit, maxPages });
+  return { workorderStatuses: results, hasMore, apiCount };
+}
+
+export async function fetchWorkorderStatus(client, workorderStatusId) {
+  const json = await client.request(`WorkorderStatus/${workorderStatusId}.json`);
+  return json?.WorkorderStatus ?? null;
+}
+
 // `search` matches against Employee.lastName (LIKE, e.g. "smith").
 // Returns { employees, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchEmployees(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
