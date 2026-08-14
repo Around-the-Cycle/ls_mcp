@@ -7,6 +7,7 @@ import {
   LightspeedClient,
   fetchSales,
   fetchSale,
+  fetchSalesSummary,
   fetchItems,
   fetchItem,
   fetchCustomers,
@@ -14,6 +15,17 @@ import {
   fetchVendors,
   fetchVendor,
 } from "./lightspeed.js";
+
+// Attaches hasMore/apiMatchCount alongside a resource's records so callers
+// can tell "that's everything" apart from "silently truncated at the cap".
+function paginatedPayload(key, records, hasMore, apiCount) {
+  return {
+    count: records.length,
+    hasMore,
+    ...(apiCount !== undefined ? { apiMatchCount: apiCount } : {}),
+    [key]: records,
+  };
+}
 
 const requiredEnv = ["LS_CLIENT_ID", "LS_CLIENT_SECRET", "LS_REFRESH_TOKEN", "LS_ACCOUNT_ID"];
 const missing = requiredEnv.filter((k) => !process.env[k]);
@@ -67,7 +79,7 @@ server.registerTool(
     },
   },
   async ({ since, until, completed_only, include_lines, limit }) => {
-    const sales = await fetchSales(client, {
+    const { sales, hasMore, apiCount } = await fetchSales(client, {
       since,
       until,
       completedOnly: completed_only,
@@ -75,8 +87,59 @@ server.registerTool(
       limit,
     });
     return {
-      content: [{ type: "text", text: JSON.stringify({ count: sales.length, sales }, null, 2) }],
+      content: [{ type: "text", text: JSON.stringify(paginatedPayload("sales", sales, hasMore, apiCount), null, 2) }],
     };
+  }
+);
+
+server.registerTool(
+  "sales_summary",
+  {
+    description:
+      "Aggregate Lightspeed Retail (R-Series) sales into summary statistics for a date range — total " +
+      "revenue, average sale value, a daily breakdown, top items by quantity/revenue, and the largest " +
+      "individual sales — computed server-side instead of returning every raw sale and line item. Use this " +
+      "for revenue/volume questions (e.g. 'how much did we sell this month') instead of list_sales, which " +
+      "returns raw records and can be very large for busy date ranges.",
+    inputSchema: {
+      since: z.string().optional().describe("ISO 8601 timestamp. Only include sales at or after this time, e.g. 2024-01-01T00:00:00-05:00"),
+      until: z.string().optional().describe("ISO 8601 timestamp. Only include sales at or before this time."),
+      completed_only: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe("Exclude sales that are not marked completed in Lightspeed."),
+      top_n: z
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .default(10)
+        .describe("How many top items and largest sales to include in the summary."),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(5000)
+        .optional()
+        .default(2000)
+        .describe(
+          "Maximum sales to fetch and aggregate over (paginates automatically). If the date range has " +
+          "more matching sales than this, the response's `truncated` flag will be true and totals will " +
+          "be an undercount — narrow the date range or raise this limit."
+        ),
+    },
+  },
+  async ({ since, until, completed_only, top_n, limit }) => {
+    const summary = await fetchSalesSummary(client, {
+      since,
+      until,
+      completedOnly: completed_only,
+      topN: top_n,
+      limit,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
   }
 );
 
@@ -115,8 +178,8 @@ server.registerTool(
     },
   },
   async ({ search, since, until, limit }) => {
-    const items = await fetchItems(client, { search, since, until, limit });
-    return { content: [{ type: "text", text: JSON.stringify({ count: items.length, items }, null, 2) }] };
+    const { items, hasMore, apiCount } = await fetchItems(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("items", items, hasMore, apiCount), null, 2) }] };
   }
 );
 
@@ -145,8 +208,8 @@ server.registerTool(
     },
   },
   async ({ search, since, until, limit }) => {
-    const customers = await fetchCustomers(client, { search, since, until, limit });
-    return { content: [{ type: "text", text: JSON.stringify({ count: customers.length, customers }, null, 2) }] };
+    const { customers, hasMore, apiCount } = await fetchCustomers(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("customers", customers, hasMore, apiCount), null, 2) }] };
   }
 );
 
@@ -177,8 +240,8 @@ server.registerTool(
     },
   },
   async ({ search, since, until, limit }) => {
-    const vendors = await fetchVendors(client, { search, since, until, limit });
-    return { content: [{ type: "text", text: JSON.stringify({ count: vendors.length, vendors }, null, 2) }] };
+    const { vendors, hasMore, apiCount } = await fetchVendors(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("vendors", vendors, hasMore, apiCount), null, 2) }] };
   }
 );
 

@@ -45,7 +45,17 @@ Claude Desktop after editing the config.
 
 - `list_sales(since?, until?, completed_only?, include_lines?, limit?)` —
   paginated sales history, newest first. `since`/`until` are ISO 8601
-  timestamps (e.g. `2024-01-01T00:00:00-05:00`).
+  timestamps (e.g. `2024-01-01T00:00:00-05:00`). For busy date ranges this
+  can return a lot of raw JSON (every sale + line item) — prefer
+  `sales_summary` for revenue/volume questions.
+- `sales_summary(since?, until?, completed_only?, top_n?, limit?)` —
+  aggregates sales for a date range into total revenue, average sale value,
+  a daily breakdown, top items by quantity/revenue, and the largest
+  individual sales, computed server-side. Use this instead of `list_sales`
+  for questions like "how much did we sell this month" — it returns a
+  compact summary instead of every raw sale/line item. If the range has more
+  matching sales than `limit` (default 2000, max 5000), the response's
+  `truncated` field is `true` and the totals are an undercount.
 - `get_sale(sale_id, include_lines?)` — a single sale by `saleID`.
 - `list_items(search?, since?, until?, limit?)` — catalog items, `search`
   matches against `description` (substring).
@@ -56,6 +66,13 @@ Claude Desktop after editing the config.
 - `list_vendors(search?, since?, until?, limit?)` — vendors, `search`
   matches against `name` (substring).
 - `get_vendor(vendor_id)` — a single vendor by `vendorID`.
+
+Every `list_*` tool's response includes `count` (records returned),
+`hasMore` (`true` if more matching records exist beyond the `limit`/page cap
+— i.e. the response was truncated, not exhaustive), and `apiMatchCount`
+(Lightspeed's own reported total match count for the query, when it
+provides one — note this is *before* client-side filters like
+`completed_only`, so it can be a bit higher than the true filtered total).
 
 Scope: only `Sale`, `Item`, `Customer`, and `Vendor` are exposed — not the
 full Lightspeed API surface (no write endpoints, no other resources like

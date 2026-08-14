@@ -91,10 +91,22 @@ export function timeStampFilter(since, until) {
 // Fetches a page-by-page collection of `resourceName` records (e.g. "Sale",
 // "Item", "Customer", "Vendor"), following the `@attributes.next` cursor URL
 // until `limit` results (post-filter) are collected or pages run out.
+//
+// Returns { results, hasMore, apiCount }:
+//   - hasMore: true if there were more matching records beyond what's
+//     returned (either more unconsumed records/pages, or `maxPages` was hit
+//     while a `next` cursor still existed). Lets callers tell "that's
+//     everything" apart from "silently truncated at the cap".
+//   - apiCount: the API's own `@attributes.count` from the first page, i.e.
+//     the total records matching the query *before* any client-side
+//     `filter` (e.g. completed_only) is applied. Undefined if the API
+//     didn't report one.
 async function paginate(client, resourceName, params, { limit, filter, maxPages = 50 } = {}) {
   const results = [];
   let nextUrl = null;
   let page = 0;
+  let hasMore = false;
+  let apiCount;
 
   while (page < maxPages) {
     page++;
@@ -102,24 +114,40 @@ async function paginate(client, resourceName, params, { limit, filter, maxPages 
       ? await client.requestAbsolute(nextUrl)
       : await client.request(`${resourceName}.json`, params);
 
+    if (page === 1) {
+      const rawCount = json?.["@attributes"]?.count;
+      if (rawCount !== undefined) apiCount = Number(rawCount);
+    }
+
     const raw = json?.[resourceName];
     const records = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    nextUrl = json?.["@attributes"]?.next || null;
 
     for (const record of records) {
       if (filter && !filter(record)) continue;
+      if (results.length >= limit) {
+        hasMore = true;
+        break;
+      }
       results.push(record);
-      if (results.length >= limit) return results;
     }
 
-    nextUrl = json?.["@attributes"]?.next || null;
+    if (results.length >= limit) {
+      if (nextUrl) hasMore = true;
+      break;
+    }
+
     if (!nextUrl) break;
   }
 
-  return results;
+  if (page >= maxPages && nextUrl) hasMore = true;
+
+  return { results, hasMore, apiCount };
 }
 
 // Fetches Sale records (optionally with SaleLines), following cursor
 // pagination until `limit` results are collected or pages run out.
+// Returns { sales, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchSales(
   client,
   { since, until, completedOnly = true, limit = 50, includeLines = true, maxPages = 50 } = {}
@@ -131,11 +159,105 @@ export async function fetchSales(
     ...(includeLines ? { load_relations: '["SaleLines"]' } : {}),
     ...(timeStamp ? { timeStamp } : {}),
   };
-  return paginate(client, "Sale", params, {
+  const { results, hasMore, apiCount } = await paginate(client, "Sale", params, {
     limit,
     maxPages,
     filter: completedOnly ? (sale) => sale.completed === "true" : undefined,
   });
+  return { sales: results, hasMore, apiCount };
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Aggregates Sale + SaleLine records into summary stats for a date range —
+// totals, daily breakdown, top items, largest sales — instead of returning
+// every raw record. Fetches up to `limit` sales (same truncation semantics
+// as fetchSales; check `truncated` on the result before trusting totals for
+// a range that might exceed `limit`).
+export async function fetchSalesSummary(
+  client,
+  { since, until, completedOnly = true, limit = 2000, maxPages = 100, topN = 10 } = {}
+) {
+  const { sales, hasMore } = await fetchSales(client, {
+    since,
+    until,
+    completedOnly,
+    limit,
+    maxPages,
+    includeLines: true,
+  });
+
+  let totalRevenue = 0;
+  let revenueBearingCount = 0;
+  let revenueBearingTotal = 0;
+  let totalUnits = 0;
+  let totalLineItems = 0;
+  const byDate = new Map(); // date -> { count, revenue }
+  const itemQty = new Map(); // itemID -> qty
+  const itemRevenue = new Map(); // itemID -> revenue
+
+  for (const sale of sales) {
+    const total = parseFloat(sale.total ?? "0") || 0;
+    totalRevenue += total;
+    if (total > 0) {
+      revenueBearingCount++;
+      revenueBearingTotal += total;
+    }
+
+    const date = (sale.timeStamp || "").slice(0, 10);
+    const dayEntry = byDate.get(date) || { count: 0, revenue: 0 };
+    dayEntry.count++;
+    dayEntry.revenue += total;
+    byDate.set(date, dayEntry);
+
+    const lines = sale.SaleLines?.SaleLine;
+    const lineArray = Array.isArray(lines) ? lines : lines ? [lines] : [];
+    for (const line of lineArray) {
+      totalLineItems++;
+      const qty = parseFloat(line.unitQuantity ?? "0") || 0;
+      const rev = parseFloat(line.calcTotal ?? "0") || 0;
+      totalUnits += qty;
+      const itemId = line.itemID ?? "unknown";
+      itemQty.set(itemId, (itemQty.get(itemId) || 0) + qty);
+      itemRevenue.set(itemId, (itemRevenue.get(itemId) || 0) + rev);
+    }
+  }
+
+  const topItemsByQuantity = [...itemQty.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topN)
+    .map(([itemID, qty]) => ({ itemID, qty }));
+
+  const topItemsByRevenue = [...itemRevenue.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topN)
+    .map(([itemID, revenue]) => ({ itemID, revenue: round2(revenue) }));
+
+  const largestSales = [...sales]
+    .sort((a, b) => (parseFloat(b.total) || 0) - (parseFloat(a.total) || 0))
+    .slice(0, topN)
+    .map((s) => ({ saleID: s.saleID, total: round2(parseFloat(s.total) || 0), timeStamp: s.timeStamp }));
+
+  const dailyBreakdown = [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, count: v.count, revenue: round2(v.revenue) }));
+
+  return {
+    saleCount: sales.length,
+    truncated: hasMore,
+    totalRevenue: round2(totalRevenue),
+    averageSaleValue: sales.length ? round2(totalRevenue / sales.length) : 0,
+    revenueBearingSaleCount: revenueBearingCount,
+    averageRevenueBearingSaleValue: revenueBearingCount ? round2(revenueBearingTotal / revenueBearingCount) : 0,
+    totalUnits,
+    totalLineItems,
+    dailyBreakdown,
+    topItemsByQuantity,
+    topItemsByRevenue,
+    largestSales,
+  };
 }
 
 export async function fetchSale(client, saleId, { includeLines = true } = {}) {
@@ -145,6 +267,7 @@ export async function fetchSale(client, saleId, { includeLines = true } = {}) {
 }
 
 // Item.description supports a LIKE-style filter: `~,%word%`.
+// Returns { items, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchItems(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
   const timeStamp = timeStampFilter(since, until);
   const params = {
@@ -153,7 +276,8 @@ export async function fetchItems(client, { since, until, search, limit = 50, max
     ...(timeStamp ? { timeStamp } : {}),
     ...(search ? { description: `~,%${search}%` } : {}),
   };
-  return paginate(client, "Item", params, { limit, maxPages });
+  const { results, hasMore, apiCount } = await paginate(client, "Item", params, { limit, maxPages });
+  return { items: results, hasMore, apiCount };
 }
 
 export async function fetchItem(client, itemId) {
@@ -162,6 +286,7 @@ export async function fetchItem(client, itemId) {
 }
 
 // `search` matches against Customer.lastName (LIKE, e.g. "smith").
+// Returns { customers, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchCustomers(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
   const timeStamp = timeStampFilter(since, until);
   const params = {
@@ -170,7 +295,8 @@ export async function fetchCustomers(client, { since, until, search, limit = 50,
     ...(timeStamp ? { timeStamp } : {}),
     ...(search ? { lastName: `~,%${search}%` } : {}),
   };
-  return paginate(client, "Customer", params, { limit, maxPages });
+  const { results, hasMore, apiCount } = await paginate(client, "Customer", params, { limit, maxPages });
+  return { customers: results, hasMore, apiCount };
 }
 
 export async function fetchCustomer(client, customerId) {
@@ -179,6 +305,7 @@ export async function fetchCustomer(client, customerId) {
 }
 
 // `search` matches against Vendor.name (LIKE, e.g. "qbp").
+// Returns { vendors, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchVendors(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
   const timeStamp = timeStampFilter(since, until);
   const params = {
@@ -187,7 +314,8 @@ export async function fetchVendors(client, { since, until, search, limit = 50, m
     ...(timeStamp ? { timeStamp } : {}),
     ...(search ? { name: `~,%${search}%` } : {}),
   };
-  return paginate(client, "Vendor", params, { limit, maxPages });
+  const { results, hasMore, apiCount } = await paginate(client, "Vendor", params, { limit, maxPages });
+  return { vendors: results, hasMore, apiCount };
 }
 
 export async function fetchVendor(client, vendorId) {
