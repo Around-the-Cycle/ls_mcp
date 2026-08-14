@@ -1,45 +1,81 @@
 # ls-mcp
 
-A local MCP server that exposes Lightspeed Retail (R-Series) API **V3** sales
-history as tools for Claude Desktop. Standalone — not part of the atc-qbp
-Rails app, so it can be pointed at Claude Desktop without dragging in Rails.
+A local MCP server that exposes Lightspeed Retail (R-Series) API **V3** data
+as tools for **Claude Code**. Standalone — not part of the atc-qbp Rails app,
+so it runs without dragging in Rails.
+
+Requires Node 18+ and the `claude` CLI.
 
 ## Setup
 
-```
-npm install
-cp .env.example .env
-```
-
-Fill in `.env` with your Lightspeed OAuth2 credentials (client id/secret,
-refresh token, account id). If you already have these for the atc-qbp app,
-they're the same values — see the mapping in `.env.example`.
-
-## Register with Claude Desktop
-
-Add to `claude_desktop_config.json` (Settings > Developer > Edit Config):
-
-```json
-{
-  "mcpServers": {
-    "lightspeed": {
-      "command": "node",
-      "args": ["/home/dechimp/.repos/ls_mcp/index.js"],
-      "env": {
-        "LS_CLIENT_ID": "...",
-        "LS_CLIENT_SECRET": "...",
-        "LS_REFRESH_TOKEN": "...",
-        "LS_ACCOUNT_ID": "..."
-      }
-    }
-  }
-}
+```bash
+git clone https://github.com/Around-the-Cycle/ls_mcp.git ~/.repos/ls_mcp
+cd ~/.repos/ls_mcp
+LS_CLIENT_ID=... LS_CLIENT_SECRET=... LS_REFRESH_TOKEN=... LS_ACCOUNT_ID=... ./setup.sh
 ```
 
-Claude Desktop launches the server as a subprocess and does not read `.env`
-files from arbitrary directories, so credentials need to be passed via the
-`env` block above (or exported in the shell Desktop inherits from). Restart
-Claude Desktop after editing the config.
+`setup.sh` installs dependencies, writes a `0600` `.env`, verifies the
+credentials against the live API, and registers the server with Claude Code.
+It is safe to re-run.
+
+The `LIGHTSPEED_*` names from the atc-qbp Rails app also work, so credentials
+copied from there need no hand-mapping:
+
+| ls-mcp | atc-qbp |
+| --- | --- |
+| `LS_CLIENT_ID` | `LIGHTSPEED_USERNAME` |
+| `LS_CLIENT_SECRET` | `LIGHTSPEED_PASS` |
+| `LS_REFRESH_TOKEN` | `LIGHTSPEED_OAUTH_REFRESH_TOKEN` |
+| `LS_ACCOUNT_ID` | `LIGHTSPEED_ACCOUNT_ID` |
+
+Without credentials in the environment, `setup.sh` uses an existing `.env`
+(copy `.env.example` and fill it in).
+
+**Restart your Claude Code session afterwards** — MCP servers connect at
+session start, so a server registered mid-session won't appear until then.
+
+Verify at any time:
+
+```bash
+npm run doctor
+```
+
+This checks the Node version, dependencies, credentials, OAuth refresh, and a
+live API call, reporting exactly which step failed.
+
+## Where credentials live
+
+In `.env` in this directory, which is gitignored and mode `0600`. It is loaded
+relative to this package, not the working directory, so it works no matter
+where the MCP host launches the server from.
+
+Credentials deliberately are **not** put in the `claude mcp add --env` block:
+that writes them in plaintext into `~/.claude.json`, giving a second copy to
+keep in sync and leak.
+
+## Claude Desktop / claude.ai
+
+Not supported. This is a local stdio server, so it only works with Claude
+Code. The claude.ai web app runs in the cloud and cannot launch a local
+process, and current Claude desktop app builds configure connectors through
+their own UI rather than a hand-edited `mcpServers` JSON block. Exposing this
+to those surfaces would mean hosting it as a remote MCP server over HTTPS.
+
+## Troubleshooting
+
+**"Failed to connect" / "Connection closed" in Claude Code.** Run
+`npm run doctor` — it surfaces the underlying cause, which the MCP host hides.
+Note that the registered command is `bin/ls-mcp`, a launcher that reinstalls
+dependencies automatically if `node_modules` goes missing.
+
+**Tools don't appear after registering.** Restart the session; MCP servers
+connect only at session start.
+
+**`OAuth token refresh` fails.** The refresh token is likely revoked —
+resetting the API client in Lightspeed invalidates it. Issue a new one.
+
+**`API request` fails but token refresh passed.** `LS_ACCOUNT_ID` is probably
+wrong.
 
 ## Tools
 

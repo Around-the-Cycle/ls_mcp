@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import "dotenv/config";
+import { loadCredentials, missingCredentialsMessage } from "./config.js";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -41,19 +41,13 @@ function paginatedPayload(key, records, hasMore, apiCount) {
   };
 }
 
-const requiredEnv = ["LS_CLIENT_ID", "LS_CLIENT_SECRET", "LS_REFRESH_TOKEN", "LS_ACCOUNT_ID"];
-const missing = requiredEnv.filter((k) => !process.env[k]);
+const { credentials, missing } = loadCredentials();
 if (missing.length) {
-  console.error(`Missing required env vars: ${missing.join(", ")}`);
+  console.error(missingCredentialsMessage(missing));
   process.exit(1);
 }
 
-const client = new LightspeedClient({
-  clientId: process.env.LS_CLIENT_ID,
-  clientSecret: process.env.LS_CLIENT_SECRET,
-  refreshToken: process.env.LS_REFRESH_TOKEN,
-  accountId: process.env.LS_ACCOUNT_ID,
-});
+const client = new LightspeedClient(credentials);
 
 const server = new McpServer({ name: "ls-mcp", version: "1.0.0" });
 

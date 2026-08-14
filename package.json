@@ -1,14 +1,19 @@
 {
   "name": "ls-mcp",
   "version": "1.0.0",
-  "description": "MCP server exposing Lightspeed Retail (R-Series) API V3 sales history as tools for Claude Desktop",
+  "description": "MCP server exposing Lightspeed Retail (R-Series) API V3 sales history as tools for Claude Code",
   "type": "module",
   "main": "index.js",
   "bin": {
-    "ls-mcp": "./index.js"
+    "ls-mcp": "./bin/ls-mcp"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "setup": "./setup.sh",
+    "doctor": "node doctor.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
