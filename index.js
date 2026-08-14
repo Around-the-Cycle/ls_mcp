@@ -8,12 +8,22 @@ import {
   fetchSales,
   fetchSale,
   fetchSalesSummary,
+  fetchOrders,
+  fetchOrder,
   fetchItems,
   fetchItem,
   fetchCustomers,
   fetchCustomer,
   fetchVendors,
   fetchVendor,
+  fetchEmployees,
+  fetchEmployee,
+  fetchCategories,
+  fetchCategory,
+  fetchManufacturers,
+  fetchManufacturer,
+  fetchShops,
+  fetchShop,
 } from "./lightspeed.js";
 
 // Attaches hasMore/apiMatchCount alongside a resource's records so callers
@@ -42,6 +52,11 @@ const client = new LightspeedClient({
 });
 
 const server = new McpServer({ name: "ls-mcp", version: "1.0.0" });
+
+const limitSchema = (def) =>
+  z.number().int().positive().max(500).optional().default(def).describe("Maximum records to return (paginates automatically, capped at 500).");
+const sinceSchema = z.string().optional().describe("ISO 8601 timestamp. Only return records modified at or after this time.");
+const untilSchema = z.string().optional().describe("ISO 8601 timestamp. Only return records modified at or before this time.");
 
 server.registerTool(
   "list_sales",
@@ -161,10 +176,69 @@ server.registerTool(
   }
 );
 
-const limitSchema = (def) =>
-  z.number().int().positive().max(500).optional().default(def).describe("Maximum records to return (paginates automatically, capped at 500).");
-const sinceSchema = z.string().optional().describe("ISO 8601 timestamp. Only return records modified at or after this time.");
-const untilSchema = z.string().optional().describe("ISO 8601 timestamp. Only return records modified at or before this time.");
+server.registerTool(
+  "list_orders",
+  {
+    description:
+      "List Lightspeed Retail (R-Series) purchase orders placed with vendors, optionally filtered by date " +
+      "range, vendor, or completion status. Returns order-level records (costs, vendor, dates, status) and, " +
+      "by default, their OrderLines (items ordered/received). Not the same as list_sales — Orders are what " +
+      "the shop buys from vendors, Sales are what customers buy from the shop.",
+    inputSchema: {
+      since: z
+        .string()
+        .optional()
+        .describe("ISO 8601 timestamp. Only return orders at or after this time, e.g. 2024-01-01T00:00:00-05:00"),
+      until: z
+        .string()
+        .optional()
+        .describe("ISO 8601 timestamp. Only return orders at or before this time."),
+      vendor_id: z
+        .union([z.string(), z.number()])
+        .optional()
+        .describe("Only return orders placed with this vendorID."),
+      complete_only: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Only include orders marked complete (fully checked in). Defaults to false since open/in-transit " +
+          "orders are usually what you want to see, unlike completed_only on list_sales."
+        ),
+      include_lines: z.boolean().optional().default(true).describe("Include each order's OrderLines (items ordered) in the result."),
+      limit: limitSchema(50),
+    },
+  },
+  async ({ since, until, vendor_id, complete_only, include_lines, limit }) => {
+    const { orders, hasMore, apiCount } = await fetchOrders(client, {
+      since,
+      until,
+      vendorId: vendor_id,
+      completeOnly: complete_only,
+      includeLines: include_lines,
+      limit,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("orders", orders, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_order",
+  {
+    description: "Fetch a single Lightspeed purchase order by its orderID, including OrderLines.",
+    inputSchema: {
+      order_id: z.union([z.string(), z.number()]).describe("The Lightspeed orderID to look up."),
+      include_lines: z.boolean().optional().default(true),
+    },
+  },
+  async ({ order_id, include_lines }) => {
+    const order = await fetchOrder(client, order_id, { includeLines: include_lines });
+    if (!order) {
+      return { content: [{ type: "text", text: `No order found for orderID ${order_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(order, null, 2) }] };
+  }
+);
 
 server.registerTool(
   "list_items",
@@ -255,6 +329,131 @@ server.registerTool(
     const vendor = await fetchVendor(client, vendor_id);
     if (!vendor) return { content: [{ type: "text", text: `No vendor found for vendorID ${vendor_id}` }], isError: true };
     return { content: [{ type: "text", text: JSON.stringify(vendor, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_employees",
+  {
+    description: "List Lightspeed employees, optionally filtered by last name or modified date.",
+    inputSchema: {
+      search: z.string().optional().describe("Substring to match against Employee.lastName, e.g. 'smith'."),
+      since: sinceSchema,
+      until: untilSchema,
+      limit: limitSchema(50),
+    },
+  },
+  async ({ search, since, until, limit }) => {
+    const { employees, hasMore, apiCount } = await fetchEmployees(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("employees", employees, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_employee",
+  {
+    description: "Fetch a single Lightspeed employee by their employeeID.",
+    inputSchema: { employee_id: z.union([z.string(), z.number()]).describe("The Lightspeed employeeID to look up.") },
+  },
+  async ({ employee_id }) => {
+    const employee = await fetchEmployee(client, employee_id);
+    if (!employee) {
+      return { content: [{ type: "text", text: `No employee found for employeeID ${employee_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(employee, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_categories",
+  {
+    description: "List Lightspeed item categories (hierarchical), optionally filtered by name or modified date.",
+    inputSchema: {
+      search: z.string().optional().describe("Substring to match against Category.name, e.g. 'wheels'."),
+      since: sinceSchema,
+      until: untilSchema,
+      limit: limitSchema(50),
+    },
+  },
+  async ({ search, since, until, limit }) => {
+    const { categories, hasMore, apiCount } = await fetchCategories(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("categories", categories, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_category",
+  {
+    description: "Fetch a single Lightspeed item category by its categoryID.",
+    inputSchema: { category_id: z.union([z.string(), z.number()]).describe("The Lightspeed categoryID to look up.") },
+  },
+  async ({ category_id }) => {
+    const category = await fetchCategory(client, category_id);
+    if (!category) {
+      return { content: [{ type: "text", text: `No category found for categoryID ${category_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(category, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_manufacturers",
+  {
+    description: "List Lightspeed manufacturers (brands), optionally filtered by name or modified date.",
+    inputSchema: {
+      search: z.string().optional().describe("Substring to match against Manufacturer.name, e.g. 'shimano'."),
+      since: sinceSchema,
+      until: untilSchema,
+      limit: limitSchema(50),
+    },
+  },
+  async ({ search, since, until, limit }) => {
+    const { manufacturers, hasMore, apiCount } = await fetchManufacturers(client, { search, since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("manufacturers", manufacturers, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_manufacturer",
+  {
+    description: "Fetch a single Lightspeed manufacturer by its manufacturerID.",
+    inputSchema: { manufacturer_id: z.union([z.string(), z.number()]).describe("The Lightspeed manufacturerID to look up.") },
+  },
+  async ({ manufacturer_id }) => {
+    const manufacturer = await fetchManufacturer(client, manufacturer_id);
+    if (!manufacturer) {
+      return { content: [{ type: "text", text: `No manufacturer found for manufacturerID ${manufacturer_id}` }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(manufacturer, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "list_shops",
+  {
+    description: "List Lightspeed shop (store) locations, optionally filtered by modified date.",
+    inputSchema: {
+      since: sinceSchema,
+      until: untilSchema,
+      limit: limitSchema(50),
+    },
+  },
+  async ({ since, until, limit }) => {
+    const { shops, hasMore, apiCount } = await fetchShops(client, { since, until, limit });
+    return { content: [{ type: "text", text: JSON.stringify(paginatedPayload("shops", shops, hasMore, apiCount), null, 2) }] };
+  }
+);
+
+server.registerTool(
+  "get_shop",
+  {
+    description: "Fetch a single Lightspeed shop (store location) by its shopID.",
+    inputSchema: { shop_id: z.union([z.string(), z.number()]).describe("The Lightspeed shopID to look up.") },
+  },
+  async ({ shop_id }) => {
+    const shop = await fetchShop(client, shop_id);
+    if (!shop) return { content: [{ type: "text", text: `No shop found for shopID ${shop_id}` }], isError: true };
+    return { content: [{ type: "text", text: JSON.stringify(shop, null, 2) }] };
   }
 );
 

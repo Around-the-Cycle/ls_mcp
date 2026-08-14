@@ -57,6 +57,12 @@ Claude Desktop after editing the config.
   matching sales than `limit` (default 2000, max 5000), the response's
   `truncated` field is `true` and the totals are an undercount.
 - `get_sale(sale_id, include_lines?)` — a single sale by `saleID`.
+- `list_orders(since?, until?, vendor_id?, complete_only?, include_lines?, limit?)`
+  — purchase orders placed *with* vendors (not customer Sales), newest
+  first. `complete_only` defaults to `false` — open/in-transit orders are
+  usually what you want to see, unlike `completed_only` on `list_sales`.
+- `get_order(order_id, include_lines?)` — a single purchase order by
+  `orderID`, including `OrderLines` (items ordered/received).
 - `list_items(search?, since?, until?, limit?)` — catalog items, `search`
   matches against `description` (substring).
 - `get_item(item_id)` — a single catalog item by `itemID`.
@@ -66,6 +72,20 @@ Claude Desktop after editing the config.
 - `list_vendors(search?, since?, until?, limit?)` — vendors, `search`
   matches against `name` (substring).
 - `get_vendor(vendor_id)` — a single vendor by `vendorID`.
+- `list_employees(search?, since?, until?, limit?)` — employees, `search`
+  matches against `lastName` (substring).
+- `get_employee(employee_id)` — a single employee by `employeeID`.
+- `list_categories(search?, since?, until?, limit?)` — item categories
+  (hierarchical — see `parentID`/`fullPathName`), `search` matches against
+  `name` (substring).
+- `get_category(category_id)` — a single category by `categoryID`.
+- `list_manufacturers(search?, since?, until?, limit?)` — manufacturers
+  (brands), `search` matches against `name` (substring).
+- `get_manufacturer(manufacturer_id)` — a single manufacturer by
+  `manufacturerID`.
+- `list_shops(since?, until?, limit?)` — store locations (typically a short,
+  mostly-static list).
+- `get_shop(shop_id)` — a single shop by `shopID`.
 
 Every `list_*` tool's response includes `count` (records returned),
 `hasMore` (`true` if more matching records exist beyond the `limit`/page cap
@@ -74,11 +94,12 @@ Every `list_*` tool's response includes `count` (records returned),
 provides one — note this is *before* client-side filters like
 `completed_only`, so it can be a bit higher than the true filtered total).
 
-Scope: only `Sale`, `Item`, `Customer`, and `Vendor` are exposed — not the
-full Lightspeed API surface (no write endpoints, no other resources like
-Employee/Register/Inventory). `LightspeedClient.request()` in
-`lightspeed.js` is generic, so adding another read-only resource follows the
-same pattern as the existing `fetch*` helpers.
+Scope: `Sale`, `Order`, `Item`, `Customer`, `Vendor`, `Employee`,
+`Category`, `Manufacturer`, and `Shop` are exposed — not the full Lightspeed
+API surface (no write endpoints, no other resources like
+Register/Inventory/Tax). `LightspeedClient.request()` in `lightspeed.js` is
+generic, so adding another read-only resource follows the same pattern as
+the existing `fetch*` helpers.
 
 ## Notes
 

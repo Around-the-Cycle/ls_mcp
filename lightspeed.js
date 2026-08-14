@@ -322,3 +322,111 @@ export async function fetchVendor(client, vendorId) {
   const json = await client.request(`Vendor/${vendorId}.json`);
   return json?.Vendor ?? null;
 }
+
+// Purchase orders placed with vendors (not customer Sales). Optionally
+// filtered by date, vendorID, and/or completion status (`complete` is only
+// set once an order has been fully checked in — most shops want to see
+// open/in-transit orders too, so unlike fetchSales this does NOT filter to
+// completed-only by default).
+// Returns { orders, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchOrders(
+  client,
+  { since, until, completeOnly = false, vendorId, limit = 50, includeLines = true, maxPages = 50 } = {}
+) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "-timeStamp",
+    ...(includeLines ? { load_relations: '["OrderLines"]' } : {}),
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(vendorId !== undefined ? { vendorID: vendorId } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Order", params, {
+    limit,
+    maxPages,
+    filter: completeOnly ? (order) => order.complete === "true" : undefined,
+  });
+  return { orders: results, hasMore, apiCount };
+}
+
+export async function fetchOrder(client, orderId, { includeLines = true } = {}) {
+  const params = includeLines ? { load_relations: '["OrderLines"]' } : {};
+  const json = await client.request(`Order/${orderId}.json`, params);
+  return json?.Order ?? null;
+}
+
+// `search` matches against Employee.lastName (LIKE, e.g. "smith").
+// Returns { employees, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchEmployees(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "employeeID",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { lastName: `~,%${search}%` } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Employee", params, { limit, maxPages });
+  return { employees: results, hasMore, apiCount };
+}
+
+export async function fetchEmployee(client, employeeId) {
+  const json = await client.request(`Employee/${employeeId}.json`);
+  return json?.Employee ?? null;
+}
+
+// Item categories (hierarchical — see `parentID`/`fullPathName`).
+// `search` matches against Category.name (LIKE, e.g. "wheels").
+// Returns { categories, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchCategories(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "categoryID",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { name: `~,%${search}%` } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Category", params, { limit, maxPages });
+  return { categories: results, hasMore, apiCount };
+}
+
+export async function fetchCategory(client, categoryId) {
+  const json = await client.request(`Category/${categoryId}.json`);
+  return json?.Category ?? null;
+}
+
+// `search` matches against Manufacturer.name (LIKE, e.g. "shimano").
+// Returns { manufacturers, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchManufacturers(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "name",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { name: `~,%${search}%` } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Manufacturer", params, { limit, maxPages });
+  return { manufacturers: results, hasMore, apiCount };
+}
+
+export async function fetchManufacturer(client, manufacturerId) {
+  const json = await client.request(`Manufacturer/${manufacturerId}.json`);
+  return json?.Manufacturer ?? null;
+}
+
+// Store locations. Typically a short, mostly-static list, so no `search`.
+// Returns { shops, hasMore, apiCount } — see `paginate` for what those mean.
+export async function fetchShops(client, { since, until, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "shopID",
+    ...(timeStamp ? { timeStamp } : {}),
+  };
+  const { results, hasMore, apiCount } = await paginate(client, "Shop", params, { limit, maxPages });
+  return { shops: results, hasMore, apiCount };
+}
+
+export async function fetchShop(client, shopId) {
+  const json = await client.request(`Shop/${shopId}.json`);
+  return json?.Shop ?? null;
+}
