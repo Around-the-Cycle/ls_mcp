@@ -1,0 +1,73 @@
+{
+  "manifest_version": "0.3",
+  "name": "ls-mcp",
+  "version": "1.0.0",
+  "description": "Lightspeed Retail (R-Series) data as MCP tools — sales, orders, workorders, items, customers, and more.",
+  "long_description": "Exposes Lightspeed Retail (R-Series) API V3 data as MCP tools: sales, purchase orders, workorders, catalog items, customers, vendors, employees, categories, manufacturers, and shops. Read-only by default; item creation/updates are available as an opt-in. Credentials are stored encrypted by Claude Desktop, not in a plaintext file.",
+  "author": {
+    "name": "Around-the-Cycle"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Around-the-Cycle/ls_mcp"
+  },
+  "license": "UNLICENSED",
+  "server": {
+    "type": "node",
+    "entry_point": "index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/index.js"],
+      "env": {
+        "LS_CLIENT_ID": "${user_config.client_id}",
+        "LS_CLIENT_SECRET": "${user_config.client_secret}",
+        "LS_REFRESH_TOKEN": "${user_config.refresh_token}",
+        "LS_ACCOUNT_ID": "${user_config.account_id}",
+        "LS_MCP_ENABLE_WRITES": "${user_config.enable_writes}"
+      }
+    }
+  },
+  "user_config": {
+    "client_id": {
+      "type": "string",
+      "title": "Lightspeed Client ID",
+      "description": "OAuth client ID from your Lightspeed API client (aka LIGHTSPEED_USERNAME).",
+      "sensitive": true,
+      "required": true
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "Lightspeed Client Secret",
+      "description": "OAuth client secret from your Lightspeed API client (aka LIGHTSPEED_PASS).",
+      "sensitive": true,
+      "required": true
+    },
+    "refresh_token": {
+      "type": "string",
+      "title": "Lightspeed Refresh Token",
+      "description": "OAuth refresh token (aka LIGHTSPEED_OAUTH_REFRESH_TOKEN). Revoked if the API client is reset in Lightspeed.",
+      "sensitive": true,
+      "required": true
+    },
+    "account_id": {
+      "type": "string",
+      "title": "Lightspeed Account ID",
+      "description": "Your Lightspeed account ID (aka LIGHTSPEED_ACCOUNT_ID).",
+      "sensitive": false,
+      "required": true
+    },
+    "enable_writes": {
+      "type": "boolean",
+      "title": "Enable write tools",
+      "description": "Turns on create_item/update_item, which can mutate your live store. Off by default — everything else is always read-only.",
+      "default": false,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

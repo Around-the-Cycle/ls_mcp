@@ -91,6 +91,29 @@ export class LightspeedClient {
   }
 }
 
+// Picks only allowlisted keys out of `source` — used both to build a write
+// payload from tool input and to show a "current values" subset of an
+// existing record for dry-run diffs. Shared by every writable resource.
+export function pickAllowed(source, allowlist) {
+  const picked = {};
+  for (const key of allowlist) {
+    if (source[key] !== undefined) picked[key] = source[key];
+  }
+  return picked;
+}
+
+async function createResource(client, resourceName, fields, allowlist) {
+  const payload = pickAllowed(fields, allowlist);
+  const json = await client.write(`${resourceName}.json`, { method: "POST", body: payload });
+  return json?.[resourceName] ?? json;
+}
+
+async function updateResource(client, resourceName, id, fields, allowlist) {
+  const payload = pickAllowed(fields, allowlist);
+  const json = await client.write(`${resourceName}/${id}.json`, { method: "PUT", body: payload });
+  return json?.[resourceName] ?? json;
+}
+
 // Builds a Lightspeed `timeStamp` filter query value.
 //   since only      -> ">,2024-01-01T00:00:00-05:00"
 //   until only      -> "<,2024-01-01T00:00:00-05:00"
@@ -338,10 +361,7 @@ function buildPricesPayload(prices) {
 // allowlisted fields out of `fields` and folds `fields.prices` (if present)
 // into the nested Prices structure the API expects.
 export function buildItemPayload(fields, allowlist = ITEM_WRITABLE_FIELDS) {
-  const payload = {};
-  for (const key of allowlist) {
-    if (fields[key] !== undefined) payload[key] = fields[key];
-  }
+  const payload = pickAllowed(fields, allowlist);
   const prices = buildPricesPayload(fields.prices);
   if (prices) payload.Prices = prices;
   return payload;
@@ -350,10 +370,7 @@ export function buildItemPayload(fields, allowlist = ITEM_WRITABLE_FIELDS) {
 // Subset of an existing Item's current values for the writable fields (plus
 // its current Prices), for showing a before/after in a dry-run response.
 export function pickItemFields(item, allowlist = ITEM_WRITABLE_FIELDS) {
-  const picked = {};
-  for (const key of allowlist) {
-    if (item[key] !== undefined) picked[key] = item[key];
-  }
+  const picked = pickAllowed(item, allowlist);
   if (item.Prices) picked.Prices = item.Prices;
   return picked;
 }
@@ -389,6 +406,32 @@ export async function fetchCustomer(client, customerId) {
   return json?.Customer ?? null;
 }
 
+// Customer fields writable through create_customer/update_customer. Contact
+// info (addresses/phones/emails) isn't included — Lightspeed's docs don't
+// clearly specify that nested Contact structure as writable via this
+// endpoint, so it's left out rather than guessed at.
+export const CUSTOMER_WRITABLE_FIELDS = [
+  "firstName",
+  "lastName",
+  "title",
+  "company",
+  "companyRegistrationNumber",
+  "vatNumber",
+  "dob",
+  "customerTypeID",
+  "discountID",
+  "taxCategoryID",
+  "archived",
+];
+
+export async function createCustomer(client, fields) {
+  return createResource(client, "Customer", fields, CUSTOMER_WRITABLE_FIELDS);
+}
+
+export async function updateCustomer(client, customerId, fields) {
+  return updateResource(client, "Customer", customerId, fields, CUSTOMER_WRITABLE_FIELDS);
+}
+
 // `search` matches against Vendor.name (LIKE, e.g. "qbp").
 // Returns { vendors, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchVendors(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
@@ -406,6 +449,28 @@ export async function fetchVendors(client, { since, until, search, limit = 50, m
 export async function fetchVendor(client, vendorId) {
   const json = await client.request(`Vendor/${vendorId}.json`);
   return json?.Vendor ?? null;
+}
+
+// Vendor fields writable through create_vendor/update_vendor. Contact and
+// Reps are left out — the API docs list them as writable but don't specify
+// the nested shape clearly enough to encode without guessing.
+export const VENDOR_WRITABLE_FIELDS = [
+  "name",
+  "accountNumber",
+  "priceLevel",
+  "updatePrice",
+  "updateCost",
+  "updateDescription",
+  "shareSellThrough",
+  "b2bSellerUID",
+];
+
+export async function createVendor(client, fields) {
+  return createResource(client, "Vendor", fields, VENDOR_WRITABLE_FIELDS);
+}
+
+export async function updateVendor(client, vendorId, fields) {
+  return updateResource(client, "Vendor", vendorId, fields, VENDOR_WRITABLE_FIELDS);
 }
 
 // Purchase orders placed with vendors (not customer Sales). Optionally
@@ -440,6 +505,34 @@ export async function fetchOrder(client, orderId, { includeLines = true } = {}) 
   return json?.Order ?? null;
 }
 
+// Order header fields writable through create_order/update_order. OrderLines
+// (the items ordered) go through a separate OrderLine endpoint this client
+// doesn't expose yet, so a created order has no line items until they're
+// added another way (e.g. the Lightspeed UI).
+export const ORDER_WRITABLE_FIELDS = [
+  "orderedDate",
+  "receivedDate",
+  "arrivalDate",
+  "refNum",
+  "shipInstructions",
+  "stockInstructions",
+  "shipCost",
+  "otherCost",
+  "discount",
+  "shopID",
+  "vendorID",
+  "b2bOrderUID",
+  "b2bOrderNumber",
+];
+
+export async function createOrder(client, fields) {
+  return createResource(client, "Order", fields, ORDER_WRITABLE_FIELDS);
+}
+
+export async function updateOrder(client, orderId, fields) {
+  return updateResource(client, "Order", orderId, fields, ORDER_WRITABLE_FIELDS);
+}
+
 // Service/repair tickets (customer, employee, status, parts, labor) — a
 // completely different resource from Order (vendor purchase orders), despite
 // the similar name. `customerId`/`employeeId`/`workorderStatusId` filter by
@@ -469,6 +562,35 @@ export async function fetchWorkorder(client, workorderId, { includeLines = true 
   const params = includeLines ? { load_relations: '["WorkorderLines","WorkorderItems"]' } : {};
   const json = await client.request(`Workorder/${workorderId}.json`, params);
   return json?.Workorder ?? null;
+}
+
+// Workorder header fields writable through create_workorder/update_workorder.
+// WorkorderLines (labor) and WorkorderItems (parts) go through separate
+// endpoints this client doesn't expose yet.
+export const WORKORDER_WRITABLE_FIELDS = [
+  "timeIn",
+  "etaOut",
+  "note",
+  "internalNote",
+  "warranty",
+  "hookIn",
+  "hookOut",
+  "saveParts",
+  "assignEmployeeToAll",
+  "customerID",
+  "discountID",
+  "employeeID",
+  "serializedID",
+  "shopID",
+  "workorderStatusID",
+];
+
+export async function createWorkorder(client, fields) {
+  return createResource(client, "Workorder", fields, WORKORDER_WRITABLE_FIELDS);
+}
+
+export async function updateWorkorder(client, workorderId, fields) {
+  return updateResource(client, "Workorder", workorderId, fields, WORKORDER_WRITABLE_FIELDS);
 }
 
 // Reference list of workorder status labels (name/color) — used to resolve
@@ -525,6 +647,17 @@ export async function fetchCategory(client, categoryId) {
   return json?.Category ?? null;
 }
 
+// Category fields writable through create_category/update_category.
+export const CATEGORY_WRITABLE_FIELDS = ["name", "fullPathName", "parentID"];
+
+export async function createCategory(client, fields) {
+  return createResource(client, "Category", fields, CATEGORY_WRITABLE_FIELDS);
+}
+
+export async function updateCategory(client, categoryId, fields) {
+  return updateResource(client, "Category", categoryId, fields, CATEGORY_WRITABLE_FIELDS);
+}
+
 // `search` matches against Manufacturer.name (LIKE, e.g. "shimano").
 // Returns { manufacturers, hasMore, apiCount } — see `paginate` for what those mean.
 export async function fetchManufacturers(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
@@ -542,6 +675,17 @@ export async function fetchManufacturers(client, { since, until, search, limit =
 export async function fetchManufacturer(client, manufacturerId) {
   const json = await client.request(`Manufacturer/${manufacturerId}.json`);
   return json?.Manufacturer ?? null;
+}
+
+// Manufacturer has exactly one writable field.
+export const MANUFACTURER_WRITABLE_FIELDS = ["name"];
+
+export async function createManufacturer(client, fields) {
+  return createResource(client, "Manufacturer", fields, MANUFACTURER_WRITABLE_FIELDS);
+}
+
+export async function updateManufacturer(client, manufacturerId, fields) {
+  return updateResource(client, "Manufacturer", manufacturerId, fields, MANUFACTURER_WRITABLE_FIELDS);
 }
 
 // Store locations. Typically a short, mostly-static list, so no `search`.
