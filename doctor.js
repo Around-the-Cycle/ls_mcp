@@ -5,7 +5,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadCredentials, missingCredentialsMessage, packageRoot } from "./config.js";
+import { loadCredentials, missingCredentialsMessage, packageRoot, writesEnabled } from "./config.js";
 import { LightspeedClient, fetchShops } from "./lightspeed.js";
 
 const pass = (msg) => console.log(`  ok    ${msg}`);
@@ -56,6 +56,12 @@ try {
   console.log(`\n${err.message}\n`);
   console.log("Token refresh worked, so check that LS_ACCOUNT_ID is correct.");
   process.exit(1);
+}
+
+if (writesEnabled()) {
+  console.log("  note  write tools ENABLED (LS_MCP_ENABLE_WRITES) — create_item/update_item can mutate the live store");
+} else {
+  console.log("  note  write tools disabled — read-only (set LS_MCP_ENABLE_WRITES=true to enable create_item/update_item)");
 }
 
 console.log("\nAll checks passed. Register the server with:");

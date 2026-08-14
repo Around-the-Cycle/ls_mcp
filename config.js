@@ -45,3 +45,11 @@ export function missingCredentialsMessage(missing) {
     "in the MCP server's env block. Run `npm run doctor` to verify setup.",
   ].join("\n");
 }
+
+// Write tools (create_item/update_item) are off unless explicitly enabled —
+// a server registered for read-only use shouldn't gain the ability to
+// mutate a live store just because credentials happen to have write scope.
+export function writesEnabled(env = process.env) {
+  const raw = (env.LS_MCP_ENABLE_WRITES ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
