@@ -9,6 +9,8 @@ atc-qbp Rails app, so it runs without dragging in Rails.
 
 Requires Node 18+ and the `claude` CLI.
 
+> Built by Claude (Anthropic), prompted and reviewed by a human maintainer.
+
 ## Setup
 
 ```bash
