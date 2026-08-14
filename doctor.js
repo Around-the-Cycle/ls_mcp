@@ -59,9 +59,9 @@ try {
 }
 
 if (writesEnabled()) {
-  console.log("  note  write tools ENABLED (LS_MCP_ENABLE_WRITES) — create_item/update_item can mutate the live store");
+  console.log("  note  write tools ENABLED (LS_MCP_ENABLE_WRITES) — create_*/update_* tools can mutate the live store");
 } else {
-  console.log("  note  write tools disabled — read-only (set LS_MCP_ENABLE_WRITES=true to enable create_item/update_item)");
+  console.log("  note  write tools disabled — read-only (set LS_MCP_ENABLE_WRITES=true to enable create_*/update_* tools)");
 }
 
 console.log("\nAll checks passed. Register the server with:");

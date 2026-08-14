@@ -9,8 +9,8 @@
 #   LS_REFRESH_TOKEN / LIGHTSPEED_OAUTH_REFRESH_TOKEN
 #   LS_ACCOUNT_ID    / LIGHTSPEED_ACCOUNT_ID
 #
-# LS_MCP_ENABLE_WRITES (optional, default false) gates create_item/update_item
-# — the write tools don't register at all unless this is true/1/yes.
+# LS_MCP_ENABLE_WRITES (optional, default false) gates the create_*/update_*
+# tools — they don't register at all unless this is true/1/yes.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

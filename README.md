@@ -1,13 +1,15 @@
 # ls-mcp
 
 A local MCP server that exposes Lightspeed Retail (R-Series) API **V3** data
-as tools for **Claude Code** — sales, purchase orders, workorders, items,
-customers, vendors, employees, categories, manufacturers, and shops.
-Read-only by default; item creation/updates are available as an opt-in (see
-[Write tools](#write-tools-off-by-default)). Standalone — not part of the
-atc-qbp Rails app, so it runs without dragging in Rails.
+as tools for **Claude Code** and **Claude Desktop** — sales, purchase orders,
+workorders, items, customers, vendors, employees, categories, manufacturers,
+and shops. Read-only by default; create/update tools for several resources
+are available as an opt-in (see [Write tools](#write-tools-off-by-default)).
+Standalone — not
+part of the atc-qbp Rails app, so it runs without dragging in Rails.
 
-Requires Node 18+ and the `claude` CLI.
+Requires Node 18+. Claude Code setup below uses the `claude` CLI; for Claude
+Desktop see [Claude Desktop](#claude-desktop).
 
 > Built by Claude (Anthropic), prompted and reviewed by a human maintainer.
 
@@ -58,13 +60,48 @@ Credentials deliberately are **not** put in the `claude mcp add --env` block:
 that writes them in plaintext into `~/.claude.json`, giving a second copy to
 keep in sync and leak.
 
-## Claude Desktop / claude.ai
+## Claude Desktop
 
-Not supported. This is a local stdio server, so it only works with Claude
-Code. The claude.ai web app runs in the cloud and cannot launch a local
-process, and current Claude desktop app builds configure connectors through
-their own UI rather than a hand-edited `mcpServers` JSON block. Exposing this
-to those surfaces would mean hosting it as a remote MCP server over HTTPS.
+Not `claude.ai` — that runs in the cloud and can't launch a local process.
+Claude Desktop can, in two ways:
+
+### One-click install (`.mcpb`)
+
+```bash
+npm run package:mcpb
+```
+
+Builds `dist/ls-mcp.mcpb` from a clean copy of the server (production
+`node_modules` only — never your working `.env` or `.git`). Double-click the
+file, or drag it into the Claude Desktop window, or use Settings → Extensions
+→ Advanced settings → Install Extension…. Claude Desktop prompts for the four
+Lightspeed credentials and stores them encrypted via the OS keychain
+(Keychain on macOS, Credential Manager on Windows) — no `.env` file involved.
+"Enable write tools" is a checkbox in the same install UI, equivalent to
+`LS_MCP_ENABLE_WRITES`.
+
+Rebuild and reinstall the `.mcpb` after any code change; Claude Desktop
+doesn't pick up edits to a running extension automatically.
+
+### Manual config
+
+Add an entry to Claude Desktop's `claude_desktop_config.json`
+(`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "lightspeed": {
+      "command": "/absolute/path/to/ls_mcp/bin/ls-mcp"
+    }
+  }
+}
+```
+
+Same launcher as Claude Code, so credentials keep living in this directory's
+`.env` (see above) rather than in that JSON file. Restart Claude Desktop
+after editing the config.
 
 ## Troubleshooting
 
@@ -161,13 +198,37 @@ wrong.
   `itemType`, `serialized`, and `itemMatrixID`, which change an item's
   structural type and are too easy to corrupt blind through an MCP tool.
 
+The same create/update pair exists for six more resources, all following the
+identical shape (`confirm` defaults to `false`; dry run shows the payload or
+`{ current, proposed }`; only an allowlisted field subset is accepted):
+
+- `create_customer`/`update_customer(customer_id, first_name?, last_name?, title?, company?, company_registration_number?, vat_number?, dob?, customer_type_id?, discount_id?, tax_category_id?, archived?, confirm?)`
+  — Contact info (addresses/phones/emails) isn't supported; manage that in
+  the Lightspeed UI.
+- `create_vendor`/`update_vendor(vendor_id, name, account_number?, price_level?, update_price?, update_cost?, update_description?, share_sell_through?, b2b_seller_uid?, confirm?)`
+  — `name` required on create. Contact and Reps aren't supported.
+- `create_category`/`update_category(category_id, name, full_path_name?, parent_id?, confirm?)`
+  — `name` required on create. `parent_id` sets hierarchy (`0` for top-level).
+- `create_manufacturer`/`update_manufacturer(manufacturer_id, name, confirm?)`
+  — one field: `name`, required on create.
+- `create_order`/`update_order(order_id, vendor_id, ordered_date?, received_date?, arrival_date?, ref_num?, ship_instructions?, stock_instructions?, ship_cost?, other_cost?, discount?, shop_id?, b2b_order_uid?, b2b_order_number?, confirm?)`
+  — vendor purchase order **header only**; `vendor_id` required on create.
+  `OrderLines` (the items ordered) go through a separate endpoint this client
+  doesn't expose yet, so a created order has no line items until added
+  another way. Setting `received_date` moves the order to "Check-In" status;
+  setting `ordered_date` moves it to "Ordered".
+- `create_workorder`/`update_workorder(workorder_id, customer_id, time_in?, eta_out?, note?, internal_note?, warranty?, hook_in?, hook_out?, save_parts?, assign_employee_to_all?, discount_id?, employee_id?, serialized_id?, shop_id?, workorder_status_id?, confirm?)`
+  — repair/service ticket **header only**; `customer_id` required on create.
+  `WorkorderLines` (labor) and `WorkorderItems` (parts) go through separate
+  endpoints this client doesn't expose yet.
+
 **These tools don't exist unless you opt in.** Set `LS_MCP_ENABLE_WRITES=true`
-in `.env` (or the server's env block) — otherwise `create_item`/`update_item`
-never get registered, regardless of what the OAuth credentials are scoped
-for. This is a separate gate from `confirm`: the env var controls whether the
-tools are *available* at all; `confirm` controls whether a given call
-*mutates* anything. Restart your Claude Code session after changing it, same
-as any other MCP config change.
+in `.env` (or the server's env block) — otherwise none of the `create_*`/
+`update_*` tools get registered, regardless of what the OAuth credentials
+are scoped for. This is a separate gate from `confirm`: the env var controls
+whether the tools are *available* at all; `confirm` controls whether a given
+call *mutates* anything. Restart your Claude Code session after changing it,
+same as any other MCP config change.
 
 Every `list_*` tool's response includes `count` (records returned),
 `hasMore` (`true` if more matching records exist beyond the `limit`/page cap
@@ -179,12 +240,17 @@ provides one — note this is *before* client-side filters like
 Scope: `Sale`, `Order`, `Workorder`/`WorkorderStatus`, `Item`, `Customer`,
 `Vendor`, `Employee`, `Category`, `Manufacturer`, and `Shop` are exposed —
 not the full Lightspeed API surface (no other resources like
-Register/Inventory/Tax). Writes are currently limited to `Item`
-(`create_item`/`update_item`, opt-in — see above); everything else is
-read-only. `LightspeedClient.request()`/`LightspeedClient.write()` in
-`lightspeed.js` are generic, so adding another read-only or writable
-resource follows the same pattern as the existing `fetch*`/`createItem`/
-`updateItem` helpers.
+Register/Inventory/Tax). Writes (opt-in — see above) cover `Item`,
+`Customer`, `Vendor`, `Category`, `Manufacturer`, `Order`, and `Workorder`;
+`Sale` and `Shop` are intentionally not writable (transactional/POS-integrity
+and store-config risk), and `Employee`/`WorkorderStatus` have no write tools
+either. `Order`/`Workorder` writes cover the header only — their line-item
+sub-resources (`OrderLine`, `WorkorderLine`, `WorkorderItem`) aren't exposed.
+`LightspeedClient.request()`/`LightspeedClient.write()` in `lightspeed.js`
+are generic, and `registerWritePair()` in `index.js` generates a
+`create_*`/`update_*` tool pair from a field-spec list, so adding another
+read-only or writable resource follows the same pattern as the existing
+ones.
 
 ## Notes
 

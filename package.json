@@ -13,7 +13,8 @@
   "scripts": {
     "start": "node index.js",
     "setup": "./setup.sh",
-    "doctor": "node doctor.js"
+    "doctor": "node doctor.js",
+    "package:mcpb": "./scripts/package-mcpb.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
