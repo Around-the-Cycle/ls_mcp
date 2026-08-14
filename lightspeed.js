@@ -88,20 +88,10 @@ export function timeStampFilter(since, until) {
   return undefined;
 }
 
-// Fetches Sale records (optionally with SaleLines), following cursor
-// pagination until `limit` results are collected or pages run out.
-export async function fetchSales(
-  client,
-  { since, until, completedOnly = true, limit = 50, includeLines = true, maxPages = 50 } = {}
-) {
-  const timeStamp = timeStampFilter(since, until);
-  const baseParams = {
-    limit: Math.min(limit, 100),
-    sort: "-timeStamp",
-    ...(includeLines ? { load_relations: '["SaleLines"]' } : {}),
-    ...(timeStamp ? { timeStamp } : {}),
-  };
-
+// Fetches a page-by-page collection of `resourceName` records (e.g. "Sale",
+// "Item", "Customer", "Vendor"), following the `@attributes.next` cursor URL
+// until `limit` results (post-filter) are collected or pages run out.
+async function paginate(client, resourceName, params, { limit, filter, maxPages = 50 } = {}) {
   const results = [];
   let nextUrl = null;
   let page = 0;
@@ -110,14 +100,14 @@ export async function fetchSales(
     page++;
     const json = nextUrl
       ? await client.requestAbsolute(nextUrl)
-      : await client.request("Sale.json", baseParams);
+      : await client.request(`${resourceName}.json`, params);
 
-    const raw = json?.Sale;
-    const sales = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const raw = json?.[resourceName];
+    const records = Array.isArray(raw) ? raw : raw ? [raw] : [];
 
-    for (const sale of sales) {
-      if (completedOnly && sale.completed !== "true") continue;
-      results.push(sale);
+    for (const record of records) {
+      if (filter && !filter(record)) continue;
+      results.push(record);
       if (results.length >= limit) return results;
     }
 
@@ -128,8 +118,79 @@ export async function fetchSales(
   return results;
 }
 
+// Fetches Sale records (optionally with SaleLines), following cursor
+// pagination until `limit` results are collected or pages run out.
+export async function fetchSales(
+  client,
+  { since, until, completedOnly = true, limit = 50, includeLines = true, maxPages = 50 } = {}
+) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "-timeStamp",
+    ...(includeLines ? { load_relations: '["SaleLines"]' } : {}),
+    ...(timeStamp ? { timeStamp } : {}),
+  };
+  return paginate(client, "Sale", params, {
+    limit,
+    maxPages,
+    filter: completedOnly ? (sale) => sale.completed === "true" : undefined,
+  });
+}
+
 export async function fetchSale(client, saleId, { includeLines = true } = {}) {
   const params = includeLines ? { load_relations: '["SaleLines"]' } : {};
   const json = await client.request(`Sale/${saleId}.json`, params);
   return json?.Sale ?? null;
+}
+
+// Item.description supports a LIKE-style filter: `~,%word%`.
+export async function fetchItems(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "description",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { description: `~,%${search}%` } : {}),
+  };
+  return paginate(client, "Item", params, { limit, maxPages });
+}
+
+export async function fetchItem(client, itemId) {
+  const json = await client.request(`Item/${itemId}.json`);
+  return json?.Item ?? null;
+}
+
+// `search` matches against Customer.lastName (LIKE, e.g. "smith").
+export async function fetchCustomers(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "lastName",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { lastName: `~,%${search}%` } : {}),
+  };
+  return paginate(client, "Customer", params, { limit, maxPages });
+}
+
+export async function fetchCustomer(client, customerId) {
+  const json = await client.request(`Customer/${customerId}.json`);
+  return json?.Customer ?? null;
+}
+
+// `search` matches against Vendor.name (LIKE, e.g. "qbp").
+export async function fetchVendors(client, { since, until, search, limit = 50, maxPages = 50 } = {}) {
+  const timeStamp = timeStampFilter(since, until);
+  const params = {
+    limit: Math.min(limit, 100),
+    sort: "name",
+    ...(timeStamp ? { timeStamp } : {}),
+    ...(search ? { name: `~,%${search}%` } : {}),
+  };
+  return paginate(client, "Vendor", params, { limit, maxPages });
+}
+
+export async function fetchVendor(client, vendorId) {
+  const json = await client.request(`Vendor/${vendorId}.json`);
+  return json?.Vendor ?? null;
 }

@@ -47,6 +47,21 @@ Claude Desktop after editing the config.
   paginated sales history, newest first. `since`/`until` are ISO 8601
   timestamps (e.g. `2024-01-01T00:00:00-05:00`).
 - `get_sale(sale_id, include_lines?)` — a single sale by `saleID`.
+- `list_items(search?, since?, until?, limit?)` — catalog items, `search`
+  matches against `description` (substring).
+- `get_item(item_id)` — a single catalog item by `itemID`.
+- `list_customers(search?, since?, until?, limit?)` — customers, `search`
+  matches against `lastName` (substring).
+- `get_customer(customer_id)` — a single customer by `customerID`.
+- `list_vendors(search?, since?, until?, limit?)` — vendors, `search`
+  matches against `name` (substring).
+- `get_vendor(vendor_id)` — a single vendor by `vendorID`.
+
+Scope: only `Sale`, `Item`, `Customer`, and `Vendor` are exposed — not the
+full Lightspeed API surface (no write endpoints, no other resources like
+Employee/Register/Inventory). `LightspeedClient.request()` in
+`lightspeed.js` is generic, so adding another read-only resource follows the
+same pattern as the existing `fetch*` helpers.
 
 ## Notes
 
