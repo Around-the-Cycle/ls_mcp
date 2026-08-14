@@ -1,8 +1,11 @@
 # ls-mcp
 
 A local MCP server that exposes Lightspeed Retail (R-Series) API **V3** data
-as tools for **Claude Code**. Standalone — not part of the atc-qbp Rails app,
-so it runs without dragging in Rails.
+as tools for **Claude Code** — sales, purchase orders, workorders, items,
+customers, vendors, employees, categories, manufacturers, and shops.
+Read-only by default; item creation/updates are available as an opt-in (see
+[Write tools](#write-tools-off-by-default)). Standalone — not part of the
+atc-qbp Rails app, so it runs without dragging in Rails.
 
 Requires Node 18+ and the `claude` CLI.
 
@@ -136,6 +139,34 @@ wrong.
   mostly-static list).
 - `get_shop(shop_id)` — a single shop by `shopID`.
 
+### Write tools (off by default)
+
+- `create_item(description, default_cost?, tax?, discountable?, upc?, ean?, custom_sku?, manufacturer_sku?, model_year?, category_id?, tax_class_id?, manufacturer_id?, default_vendor_id?, prices?, confirm?)`
+  — creates a new catalog `Item`. `confirm` defaults to `false`: without it,
+  the tool returns the payload it *would* send instead of creating anything.
+  Pass `confirm: true` to actually create it.
+- `update_item(item_id, description?, default_cost?, ..., prices?, confirm?)`
+  — same fields as `create_item`, applied to an existing item. `confirm`
+  defaults to `false`: without it, the tool fetches the item and returns
+  `{ current, proposed }` so you can review the diff before applying it.
+  Pass `confirm: true` to actually apply the update.
+- `prices` on both: an array of `{ use_type_id, amount }`. `use_type_id` is
+  an account-specific price-slot ID (Default, MSRP, etc.) with no fixed
+  numbering — read valid IDs off an existing item's `Prices.ItemPrice` via
+  `get_item` first. Only slots you list are touched; others are left as-is.
+- Both tools only accept a conservative field allowlist (see
+  `ITEM_WRITABLE_FIELDS` in `lightspeed.js`) — deliberately excludes
+  `itemType`, `serialized`, and `itemMatrixID`, which change an item's
+  structural type and are too easy to corrupt blind through an MCP tool.
+
+**These tools don't exist unless you opt in.** Set `LS_MCP_ENABLE_WRITES=true`
+in `.env` (or the server's env block) — otherwise `create_item`/`update_item`
+never get registered, regardless of what the OAuth credentials are scoped
+for. This is a separate gate from `confirm`: the env var controls whether the
+tools are *available* at all; `confirm` controls whether a given call
+*mutates* anything. Restart your Claude Code session after changing it, same
+as any other MCP config change.
+
 Every `list_*` tool's response includes `count` (records returned),
 `hasMore` (`true` if more matching records exist beyond the `limit`/page cap
 — i.e. the response was truncated, not exhaustive), and `apiMatchCount`
@@ -145,10 +176,13 @@ provides one — note this is *before* client-side filters like
 
 Scope: `Sale`, `Order`, `Workorder`/`WorkorderStatus`, `Item`, `Customer`,
 `Vendor`, `Employee`, `Category`, `Manufacturer`, and `Shop` are exposed —
-not the full Lightspeed API surface (no write endpoints, no other resources
-like Register/Inventory/Tax). `LightspeedClient.request()` in
-`lightspeed.js` is generic, so adding another read-only resource follows
-the same pattern as the existing `fetch*` helpers.
+not the full Lightspeed API surface (no other resources like
+Register/Inventory/Tax). Writes are currently limited to `Item`
+(`create_item`/`update_item`, opt-in — see above); everything else is
+read-only. `LightspeedClient.request()`/`LightspeedClient.write()` in
+`lightspeed.js` are generic, so adding another read-only or writable
+resource follows the same pattern as the existing `fetch*`/`createItem`/
+`updateItem` helpers.
 
 ## Notes
 

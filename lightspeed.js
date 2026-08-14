@@ -62,18 +62,32 @@ export class LightspeedClient {
     return this.#authedFetch(url);
   }
 
-  async #authedFetch(url, retried = false) {
+  // path: e.g. "Item.json" (create) or "Item/123.json" (update); body: plain
+  // object, JSON-encoded. method must be "POST" (create) or "PUT" (update).
+  async write(path, { method, body }) {
+    const url = `${API_BASE}/Account/${this.accountId}/${path}`;
+    return this.#authedFetch(url, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+  }
+
+  async #authedFetch(url, init = {}, retried = false) {
     const token = await this.getAccessToken();
-    const res = await fetch(url, { headers: { authorization: `OAuth ${token}` } });
+    const res = await fetch(url, {
+      ...init,
+      headers: { authorization: `OAuth ${token}`, ...(init.headers ?? {}) },
+    });
     if (res.status === 401 && !retried) {
       this.accessToken = null; // force a fresh token and retry once
-      return this.#authedFetch(url, true);
+      return this.#authedFetch(url, init, true);
     }
     const text = await res.text();
     if (!res.ok) {
       throw new Error(`Lightspeed API error ${res.status} for ${url}: ${text}`);
     }
-    return JSON.parse(text);
+    return text ? JSON.parse(text) : null;
   }
 }
 
@@ -283,6 +297,77 @@ export async function fetchItems(client, { since, until, search, limit = 50, max
 export async function fetchItem(client, itemId) {
   const json = await client.request(`Item/${itemId}.json`);
   return json?.Item ?? null;
+}
+
+// Item fields writable through create_item/update_item — a conservative
+// subset of what the Lightspeed API actually accepts. Deliberately omits
+// itemType, serialized, and itemMatrixID: those change an item's structural
+// type (e.g. turning it into a matrix parent/child) and are too easy to
+// corrupt blind through an MCP tool. Same allowlist for create and update.
+export const ITEM_WRITABLE_FIELDS = [
+  "description",
+  "defaultCost",
+  "tax",
+  "discountable",
+  "upc",
+  "ean",
+  "customSku",
+  "manufacturerSku",
+  "modelYear",
+  "categoryID",
+  "taxClassID",
+  "manufacturerID",
+  "defaultVendorID",
+];
+
+// Prices are set via a nested Prices.ItemPrice array, each entry keyed by
+// useTypeID — an account-specific price-slot ID (Default, MSRP, etc.) with
+// no fixed numbering. Callers should read valid IDs off an existing item's
+// Prices via fetchItem/get_item rather than guessing.
+function buildPricesPayload(prices) {
+  if (!prices) return undefined;
+  return {
+    ItemPrice: prices.map(({ useTypeID, amount }) => ({
+      useTypeID: String(useTypeID),
+      amount: String(amount),
+    })),
+  };
+}
+
+// Builds the JSON body for a create_item/update_item API call: picks only
+// allowlisted fields out of `fields` and folds `fields.prices` (if present)
+// into the nested Prices structure the API expects.
+export function buildItemPayload(fields, allowlist = ITEM_WRITABLE_FIELDS) {
+  const payload = {};
+  for (const key of allowlist) {
+    if (fields[key] !== undefined) payload[key] = fields[key];
+  }
+  const prices = buildPricesPayload(fields.prices);
+  if (prices) payload.Prices = prices;
+  return payload;
+}
+
+// Subset of an existing Item's current values for the writable fields (plus
+// its current Prices), for showing a before/after in a dry-run response.
+export function pickItemFields(item, allowlist = ITEM_WRITABLE_FIELDS) {
+  const picked = {};
+  for (const key of allowlist) {
+    if (item[key] !== undefined) picked[key] = item[key];
+  }
+  if (item.Prices) picked.Prices = item.Prices;
+  return picked;
+}
+
+export async function createItem(client, fields) {
+  const payload = buildItemPayload(fields);
+  const json = await client.write("Item.json", { method: "POST", body: payload });
+  return json?.Item ?? json;
+}
+
+export async function updateItem(client, itemId, fields) {
+  const payload = buildItemPayload(fields);
+  const json = await client.write(`Item/${itemId}.json`, { method: "PUT", body: payload });
+  return json?.Item ?? json;
 }
 
 // `search` matches against Customer.lastName (LIKE, e.g. "smith").

@@ -8,6 +8,9 @@
 #   LS_CLIENT_SECRET / LIGHTSPEED_PASS
 #   LS_REFRESH_TOKEN / LIGHTSPEED_OAUTH_REFRESH_TOKEN
 #   LS_ACCOUNT_ID    / LIGHTSPEED_ACCOUNT_ID
+#
+# LS_MCP_ENABLE_WRITES (optional, default false) gates create_item/update_item
+# — the write tools don't register at all unless this is true/1/yes.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +53,7 @@ LS_CLIENT_ID=$client_id
 LS_CLIENT_SECRET=$client_secret
 LS_REFRESH_TOKEN=$refresh_token
 LS_ACCOUNT_ID=$account_id
+LS_MCP_ENABLE_WRITES=${LS_MCP_ENABLE_WRITES:-false}
 EOF
   chmod 600 .env
 elif [ -f .env ]; then

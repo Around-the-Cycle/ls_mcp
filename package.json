@@ -1,7 +1,7 @@
 {
   "name": "ls-mcp",
   "version": "1.0.0",
-  "description": "MCP server exposing Lightspeed Retail (R-Series) API V3 sales history as tools for Claude Code",
+  "description": "MCP server exposing Lightspeed Retail (R-Series) API V3 data — sales, orders, workorders, items, customers, and more — as tools for Claude Code",
   "type": "module",
   "main": "index.js",
   "bin": {

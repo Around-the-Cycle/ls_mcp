@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadCredentials, missingCredentialsMessage } from "./config.js";
+import { loadCredentials, missingCredentialsMessage, writesEnabled } from "./config.js";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -16,6 +16,11 @@ import {
   fetchWorkorderStatus,
   fetchItems,
   fetchItem,
+  createItem,
+  updateItem,
+  buildItemPayload,
+  pickItemFields,
+  ITEM_WRITABLE_FIELDS,
   fetchCustomers,
   fetchCustomer,
   fetchVendors,
@@ -48,6 +53,8 @@ if (missing.length) {
 }
 
 const client = new LightspeedClient(credentials);
+const writesOn = writesEnabled();
+console.error(`ls-mcp: write tools ${writesOn ? "ENABLED" : "disabled"} (set LS_MCP_ENABLE_WRITES=true to enable)`);
 
 const server = new McpServer({ name: "ls-mcp", version: "1.0.0" });
 
@@ -361,6 +368,148 @@ server.registerTool(
     return { content: [{ type: "text", text: JSON.stringify(item, null, 2) }] };
   }
 );
+
+// Shared input schema fields for create_item/update_item — snake_case tool
+// inputs, mapped below to the camelCase field names Lightspeed's API uses.
+const itemFieldSchema = {
+  default_cost: z.union([z.string(), z.number()]).optional().describe("Cost the shop pays, e.g. 12.50."),
+  tax: z.boolean().optional(),
+  discountable: z.boolean().optional(),
+  upc: z.string().optional(),
+  ean: z.string().optional(),
+  custom_sku: z.string().optional(),
+  manufacturer_sku: z.string().optional(),
+  model_year: z.union([z.string(), z.number()]).optional(),
+  category_id: z.union([z.string(), z.number()]).optional().describe("Item.categoryID — see list_categories/get_category."),
+  tax_class_id: z.union([z.string(), z.number()]).optional(),
+  manufacturer_id: z.union([z.string(), z.number()]).optional().describe("Item.manufacturerID — see list_manufacturers/get_manufacturer."),
+  default_vendor_id: z.union([z.string(), z.number()]).optional().describe("Item.defaultVendorID — see list_vendors/get_vendor."),
+  prices: z
+    .array(
+      z.object({
+        use_type_id: z
+          .union([z.string(), z.number()])
+          .describe(
+            "Account-specific price-slot ID (Default, MSRP, etc.) — there's no fixed numbering. " +
+              "Read valid IDs off this item's current Prices via get_item before setting one."
+          ),
+        amount: z.union([z.string(), z.number()]).describe("Price amount, e.g. 49.99."),
+      })
+    )
+    .optional()
+    .describe("Prices to set. Only include slots you intend to change — unlisted slots are left as-is."),
+};
+
+// Maps snake_case tool input (as validated by itemFieldSchema) to the
+// camelCase field names lightspeed.js's buildItemPayload expects.
+function mapItemInput(input) {
+  const fields = {};
+  if (input.description !== undefined) fields.description = input.description;
+  if (input.default_cost !== undefined) fields.defaultCost = input.default_cost;
+  if (input.tax !== undefined) fields.tax = input.tax;
+  if (input.discountable !== undefined) fields.discountable = input.discountable;
+  if (input.upc !== undefined) fields.upc = input.upc;
+  if (input.ean !== undefined) fields.ean = input.ean;
+  if (input.custom_sku !== undefined) fields.customSku = input.custom_sku;
+  if (input.manufacturer_sku !== undefined) fields.manufacturerSku = input.manufacturer_sku;
+  if (input.model_year !== undefined) fields.modelYear = input.model_year;
+  if (input.category_id !== undefined) fields.categoryID = input.category_id;
+  if (input.tax_class_id !== undefined) fields.taxClassID = input.tax_class_id;
+  if (input.manufacturer_id !== undefined) fields.manufacturerID = input.manufacturer_id;
+  if (input.default_vendor_id !== undefined) fields.defaultVendorID = input.default_vendor_id;
+  if (input.prices !== undefined) {
+    fields.prices = input.prices.map((p) => ({ useTypeID: p.use_type_id, amount: p.amount }));
+  }
+  return fields;
+}
+
+if (writesOn) {
+  server.registerTool(
+    "create_item",
+    {
+      description:
+        "Create a new Lightspeed catalog item (Item). WRITES to the live store. Defaults to a dry run — " +
+        "returns the payload that would be sent without creating anything. Pass confirm: true to actually " +
+        "create it. Prices need an account-specific useTypeID; look one up from an existing item via get_item.",
+      inputSchema: {
+        description: z.string().describe("Item description/title. Required by Lightspeed."),
+        ...itemFieldSchema,
+        confirm: z.boolean().optional().default(false).describe("Set true to actually create the item. Defaults to false (dry run)."),
+      },
+    },
+    async ({ confirm, ...input }) => {
+      const fields = mapItemInput(input);
+      const payload = buildItemPayload(fields, ITEM_WRITABLE_FIELDS);
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { dryRun: true, proposed: payload, message: "Dry run — no item created. Pass confirm: true to create it." },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+      const created = await createItem(client, fields);
+      return { content: [{ type: "text", text: JSON.stringify({ applied: true, item: created }, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "update_item",
+    {
+      description:
+        "Update fields on an existing Lightspeed catalog item (Item). WRITES to the live store. Defaults to " +
+        "a dry run — returns the current values and proposed change without applying it. Pass confirm: true " +
+        "to actually apply the update. Only a safe subset of Item fields is writable (not itemType/serialized/ " +
+        "itemMatrixID, which change an item's structural type). Prices need an account-specific useTypeID; " +
+        "look one up from this item's current Prices via get_item.",
+      inputSchema: {
+        item_id: z.union([z.string(), z.number()]).describe("The Lightspeed itemID to update."),
+        description: z.string().optional(),
+        ...itemFieldSchema,
+        confirm: z.boolean().optional().default(false).describe("Set true to actually apply the update. Defaults to false (dry run)."),
+      },
+    },
+    async ({ item_id, confirm, ...input }) => {
+      const current = await fetchItem(client, item_id);
+      if (!current) {
+        return { content: [{ type: "text", text: `No item found for itemID ${item_id}` }], isError: true };
+      }
+      const fields = mapItemInput(input);
+      const payload = buildItemPayload(fields, ITEM_WRITABLE_FIELDS);
+      if (Object.keys(payload).length === 0) {
+        return { content: [{ type: "text", text: "No fields provided to update." }], isError: true };
+      }
+      if (!confirm) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  dryRun: true,
+                  itemID: item_id,
+                  current: pickItemFields(current, ITEM_WRITABLE_FIELDS),
+                  proposed: payload,
+                  message: "Dry run — no changes applied. Pass confirm: true to apply this update.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+      const updated = await updateItem(client, item_id, fields);
+      return { content: [{ type: "text", text: JSON.stringify({ applied: true, item: updated }, null, 2) }] };
+    }
+  );
+}
 
 server.registerTool(
   "list_customers",
